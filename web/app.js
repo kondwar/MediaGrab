@@ -15,54 +15,72 @@ const supportedLanguages = ["en", "ar"];
 
 const elements = {
     html: document.documentElement,
-    languageButton: document.getElementById("languageButton"),
-    themeButton: document.getElementById("themeButton"),
-    languageSelector: document.getElementById("languageSelector"),
 
-    urlInput: document.getElementById("urlInput"),
-    clearUrl: document.getElementById("clearUrl"),
+    languageButton:
+        document.getElementById("languageButton"),
 
-    mediaTypeButtons: document.querySelectorAll(".media-type-button"),
+    themeButton:
+        document.getElementById("themeButton"),
 
-    quality: document.getElementById("quality"),
-    format: document.getElementById("format"),
-    audioLanguage: document.getElementById("audioLanguage"),
+    urlInput:
+        document.getElementById("urlInput"),
 
-    advancedButton: document.getElementById("advancedButton"),
-    advancedOptions: document.getElementById("advancedOptions"),
+    clearUrl:
+        document.getElementById("clearUrl"),
 
-    downloadButton: document.getElementById("downloadButton")
+    mediaTypeButtons:
+        document.querySelectorAll(".media-type-button"),
+
+    quality:
+        document.getElementById("quality"),
+
+    format:
+        document.getElementById("format"),
+
+    audioLanguage:
+        document.getElementById("audioLanguage"),
+
+    advancedButton:
+        document.getElementById("advancedButton"),
+
+    advancedOptions:
+        document.getElementById("advancedOptions"),
+
+    downloadButton:
+        document.getElementById("downloadButton")
 };
 
-
-/* =========================================================
-   Translation helpers
-========================================================= */
-
-function getTranslationObject(path, fallback = "") {
-    const parts = path.split(".");
+function translate(key) {
     let value = state.translations;
 
-    for (const part of parts) {
-        if (value && Object.prototype.hasOwnProperty.call(value, part)) {
-            value = value[part];
-        } else {
-            return fallback;
+    for (const part of key.split(".")) {
+        if (!value || typeof value !== "object") {
+            return key;
         }
+
+        value = value[part];
     }
 
-    return typeof value === "string" ? value : fallback;
+    return typeof value === "string"
+        ? value
+        : key;
 }
 
+function setOptions(select, options) {
+    if (!select) return;
 
-function translate(key) {
-    return getTranslationObject(key, key);
+    select.innerHTML = "";
+
+    options.forEach(option => {
+        const item =
+            document.createElement("option");
+
+        item.value = option.value;
+        item.textContent = option.label;
+
+        select.appendChild(item);
+    });
 }
-
-
-/* =========================================================
-   Load language
-========================================================= */
 
 async function loadLanguage(language) {
     if (!supportedLanguages.includes(language)) {
@@ -71,132 +89,112 @@ async function loadLanguage(language) {
 
     try {
         const response = await fetch(
-            `/translations/${language}.json`,
+            `/translations/${language}.json?v=4`,
             {
-                cache: "no-cache"
+                cache: "no-store"
             }
         );
 
         if (!response.ok) {
             throw new Error(
-                `Translation file failed: ${response.status}`
+                `Translation error: ${response.status}`
             );
         }
 
-        state.translations = await response.json();
-        state.language = language;
-
-        localStorage.setItem(
-            "mediagrab-language",
-            language
-        );
-
-        applyLanguage();
+        state.translations =
+            await response.json();
 
     } catch (error) {
-        console.error("Language loading error:", error);
+        console.error(
+            "Language loading error:",
+            error
+        );
 
-        if (language !== "en") {
-            await loadLanguage("en");
-        }
+        state.translations = {};
     }
-}
 
+    state.language = language;
 
-/* =========================================================
-   Apply language
-========================================================= */
+    localStorage.setItem(
+        "mediagrab-language",
+        language
+    );
 
-function applyLanguage() {
-    const isArabic = state.language === "ar";
-
-    elements.html.lang = state.language;
-    elements.html.dir = isArabic ? "rtl" : "ltr";
-
-    document.querySelectorAll("[data-i18n]").forEach((element) => {
-        const key = element.getAttribute("data-i18n");
-        const value = translate(key);
-
-        if (value) {
-            element.textContent = value;
+    applyLanguage();
         }
-    });
+function applyLanguage() {
+    const isArabic =
+        state.language === "ar";
+
+    elements.html.lang =
+        state.language;
+
+    elements.html.dir =
+        isArabic ? "rtl" : "ltr";
+
+    document
+        .querySelectorAll("[data-i18n]")
+        .forEach(element => {
+            const key =
+                element.getAttribute("data-i18n");
+
+            const value =
+                translate(key);
+
+            if (value !== key) {
+                element.textContent = value;
+            }
+        });
 
     document
         .querySelectorAll("[data-i18n-placeholder]")
-        .forEach((element) => {
-            const key = element.getAttribute(
-                "data-i18n-placeholder"
-            );
+        .forEach(element => {
+            const key =
+                element.getAttribute(
+                    "data-i18n-placeholder"
+                );
 
-            element.placeholder = translate(key);
+            const value =
+                translate(key);
+
+            if (value !== key) {
+                element.placeholder = value;
+            }
         });
 
     updateLanguageButton();
+    updatePageMetadata();
+    updateOptions();
     updateAdvancedButton();
     updateDownloadButton();
-    updatePageMetadata();
-    updateOptionsForType();
 }
-
-
-/* =========================================================
-   Page metadata
-========================================================= */
-
-function updatePageMetadata() {
-    const title = translate("site.title");
-    const description = translate("site.description");
-
-    if (title) {
-        document.title = title;
-    }
-
-    const descriptionElement =
-        document.querySelector('meta[name="description"]');
-
-    if (descriptionElement && description) {
-        descriptionElement.setAttribute(
-            "content",
-            description
-        );
-    }
-}
-
-
-/* =========================================================
-   Language selector
-========================================================= */
 
 function updateLanguageButton() {
-    if (!elements.languageButton) {
-        return;
-    }
-
-    const languageName =
-        languageNames[state.language] || "English";
+    if (!elements.languageButton) return;
 
     elements.languageButton.textContent =
-        `🌐 ${languageName}`;
+        `🌐 ${languageNames[state.language]}`;
 }
 
-
 function createLanguageMenu() {
-    const existingMenu =
+    const oldMenu =
         document.querySelector(".language-menu");
 
-    if (existingMenu) {
-        existingMenu.remove();
+    if (oldMenu) {
+        oldMenu.remove();
     }
 
-    const menu = document.createElement("div");
+    const menu =
+        document.createElement("div");
 
     menu.className = "language-menu";
 
-    supportedLanguages.forEach((language) => {
-        const button = document.createElement("button");
+    supportedLanguages.forEach(language => {
+        const button =
+            document.createElement("button");
 
         button.type = "button";
+
         button.textContent =
             languageNames[language];
 
@@ -204,13 +202,16 @@ function createLanguageMenu() {
             button.classList.add("active");
         }
 
-        button.addEventListener("click", async (event) => {
-            event.stopPropagation();
+        button.addEventListener(
+            "click",
+            async event => {
+                event.stopPropagation();
 
-            await loadLanguage(language);
+                await loadLanguage(language);
 
-            menu.remove();
-        });
+                menu.remove();
+            }
+        );
 
         menu.appendChild(button);
     });
@@ -218,422 +219,382 @@ function createLanguageMenu() {
     return menu;
 }
 
-
 if (elements.languageButton) {
     elements.languageButton.addEventListener(
         "click",
-        (event) => {
+        event => {
             event.stopPropagation();
 
-            const existingMenu =
-                document.querySelector(".language-menu");
+            const oldMenu =
+                document.querySelector(
+                    ".language-menu"
+                );
 
-            if (existingMenu) {
-                existingMenu.remove();
+            if (oldMenu) {
+                oldMenu.remove();
                 return;
             }
 
-            const menu = createLanguageMenu();
+            const menu =
+                createLanguageMenu();
 
-            const wrapper =
+            const parent =
                 elements.languageButton.parentElement;
 
-            if (wrapper) {
-                wrapper.appendChild(menu);
-            } else {
-                document.body.appendChild(menu);
+            if (parent) {
+                parent.appendChild(menu);
             }
         }
     );
 }
 
+document.addEventListener(
+    "click",
+    () => {
+        const menu =
+            document.querySelector(
+                ".language-menu"
+            );
 
-document.addEventListener("click", () => {
-    const menu =
-        document.querySelector(".language-menu");
-
-    if (menu) {
-        menu.remove();
+        if (menu) {
+            menu.remove();
+        }
     }
-});
+);
 
+function updatePageMetadata() {
+    const title =
+        translate("site.title");
 
-/* =========================================================
-   Media type
-========================================================= */
+    const description =
+        translate("site.description");
+
+    if (title) {
+        document.title = title;
+    }
+
+    const meta =
+        document.querySelector(
+            'meta[name="description"]'
+        );
+
+    if (meta && description) {
+        meta.setAttribute(
+            "content",
+            description
+        );
+    }
+}
 
 function updateMediaType(type) {
     state.mediaType = type;
 
-    elements.mediaTypeButtons.forEach((button) => {
-        const buttonType =
-            button.getAttribute("data-type");
+    elements.mediaTypeButtons.forEach(
+        button => {
+            button.classList.toggle(
+                "active",
+                button.dataset.type === type
+            );
+        }
+    );
 
-        button.classList.toggle(
-            "active",
-            buttonType === type
-        );
-    });
-
-    updateOptionsForType();
+    updateOptions();
 }
 
-
-function setupMediaTypeButtons() {
-    elements.mediaTypeButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-            const type =
-                button.getAttribute("data-type");
-
-            if (type) {
-                updateMediaType(type);
-            }
-        });
-    });
+function setupMediaTypes() {
+    elements.mediaTypeButtons.forEach(
+        button => {
+            button.addEventListener(
+                "click",
+                () => {
+                    updateMediaType(
+                        button.dataset.type
+                    );
+                }
+            );
+        }
+    );
 }
+function optionLabel(key, english, arabic) {
+    const value = translate(key);
 
-
-/* =========================================================
-   Select helpers
-========================================================= */
-
-function setSelectOptions(select, options) {
-    if (!select) {
-        return;
+    if (value !== key) {
+        return value;
     }
 
-    select.innerHTML = "";
-
-    options.forEach((option) => {
-        const optionElement =
-            document.createElement("option");
-
-        optionElement.value = option.value;
-        optionElement.textContent = option.label;
-
-        select.appendChild(optionElement);
-    });
+    return state.language === "ar"
+        ? arabic
+        : english;
 }
 
+function updateOptions() {
+    const type = state.mediaType;
 
-/* =========================================================
-   Dynamic options
-========================================================= */
-
-function updateOptionsForType() {
-    if (!elements.quality ||
-        !elements.format ||
-        !elements.audioLanguage) {
-        return;
-    }
-
-    if (state.mediaType === "video") {
-
-        setSelectOptions(elements.quality, [
+    if (type === "video") {
+        setOptions(elements.quality, [
             {
                 value: "best",
-                label: translate(
-                    "options.bestAvailable"
+                label: optionLabel(
+                    "options.bestAvailable",
+                    "Best Available",
+                    "أفضل جودة متاحة"
                 )
             },
             {
                 value: "2160p",
-                label: "2160p"
+                label: optionLabel(
+                    "options.2160p",
+                    "2160p (4K)",
+                    "2160p (4K)"
+                )
             },
             {
                 value: "1440p",
-                label: "1440p"
+                label: optionLabel(
+                    "options.1440p",
+                    "1440p",
+                    "1440p"
+                )
             },
             {
                 value: "1080p",
-                label: "1080p"
+                label: optionLabel(
+                    "options.1080p",
+                    "1080p",
+                    "1080p"
+                )
             },
             {
                 value: "720p",
-                label: "720p"
+                label: optionLabel(
+                    "options.720p",
+                    "720p",
+                    "720p"
+                )
             },
             {
                 value: "480p",
-                label: "480p"
+                label: optionLabel(
+                    "options.480p",
+                    "480p",
+                    "480p"
+                )
             },
             {
                 value: "360p",
-                label: "360p"
+                label: optionLabel(
+                    "options.360p",
+                    "360p",
+                    "360p"
+                )
             }
         ]);
 
-        setSelectOptions(elements.format, [
+        setOptions(elements.format, [
             {
                 value: "mp4",
-                label: "MP4"
+                label: optionLabel(
+                    "options.mp4",
+                    "MP4",
+                    "MP4"
+                )
             },
             {
                 value: "webm",
-                label: "WEBM"
+                label: optionLabel(
+                    "options.webm",
+                    "WEBM",
+                    "WEBM"
+                )
             },
             {
                 value: "mkv",
-                label: "MKV"
+                label: optionLabel(
+                    "options.mkv",
+                    "MKV",
+                    "MKV"
+                )
             }
         ]);
+    }
 
-        setSelectOptions(elements.audioLanguage, [
+    if (type === "audio") {
+        setOptions(elements.quality, [
             {
                 value: "original",
-                label: translate(
-                    "options.originalAudio"
-                )
-            },
-            {
-                value: "any",
-                label: translate(
-                    "options.anyLanguage"
-                )
-            }
-        ]);
-
-    } else if (state.mediaType === "audio") {
-
-        setSelectOptions(elements.quality, [
-            {
-                value: "best",
-                label: translate(
-                    "options.bestAvailable"
+                label: optionLabel(
+                    "options.originalAudio",
+                    "Original Audio",
+                    "الصوت الأصلي"
                 )
             },
             {
                 value: "320",
-                label: "320 kbps"
+                label: optionLabel(
+                    "options.320kbps",
+                    "320 kbps",
+                    "320 kbps"
+                )
             },
             {
                 value: "256",
-                label: "256 kbps"
+                label: optionLabel(
+                    "options.256kbps",
+                    "256 kbps",
+                    "256 kbps"
+                )
             },
             {
                 value: "192",
-                label: "192 kbps"
+                label: optionLabel(
+                    "options.192kbps",
+                    "192 kbps",
+                    "192 kbps"
+                )
             },
             {
                 value: "128",
-                label: "128 kbps"
+                label: optionLabel(
+                    "options.128kbps",
+                    "128 kbps",
+                    "128 kbps"
+                )
             }
         ]);
 
-        setSelectOptions(elements.format, [
+        setOptions(elements.format, [
             {
                 value: "mp3",
-                label: "MP3"
+                label: optionLabel(
+                    "options.mp3",
+                    "MP3",
+                    "MP3"
+                )
             },
             {
                 value: "m4a",
-                label: "M4A"
+                label: optionLabel(
+                    "options.m4a",
+                    "M4A",
+                    "M4A"
+                )
             },
             {
                 value: "opus",
-                label: "OPUS"
+                label: optionLabel(
+                    "options.opus",
+                    "OPUS",
+                    "OPUS"
+                )
             }
         ]);
+    }
 
-        setSelectOptions(elements.audioLanguage, [
+    if (type === "subtitles") {
+        setOptions(elements.quality, [
             {
                 value: "original",
-                label: translate(
-                    "options.originalAudio"
-                )
-            },
-            {
-                value: "any",
-                label: translate(
-                    "options.anyLanguage"
+                label: optionLabel(
+                    "options.originalLanguage",
+                    "Original Language",
+                    "اللغة الأصلية"
                 )
             }
         ]);
 
-    } else if (state.mediaType === "subtitles") {
-
-        setSelectOptions(elements.quality, [
-            {
-                value: "available",
-                label: translate(
-                    "options.availableLanguages"
-                )
-            }
-        ]);
-
-        setSelectOptions(elements.format, [
+        setOptions(elements.format, [
             {
                 value: "srt",
-                label: "SRT"
+                label: optionLabel(
+                    "options.srt",
+                    "SRT",
+                    "SRT"
+                )
             },
             {
                 value: "vtt",
-                label: "VTT"
-            },
-            {
-                value: "txt",
-                label: "TXT"
-            }
-        ]);
-
-        setSelectOptions(elements.audioLanguage, [
-            {
-                value: "original",
-                label: translate(
-                    "options.originalLanguage"
+                label: optionLabel(
+                    "options.vtt",
+                    "VTT",
+                    "VTT"
                 )
             },
             {
-                value: "any",
-                label: translate(
-                    "options.anyLanguage"
+                value: "txt",
+                label: optionLabel(
+                    "options.txt",
+                    "TXT",
+                    "TXT"
                 )
             }
         ]);
+    }
 
-    } else if (state.mediaType === "text") {
-
-        setSelectOptions(elements.quality, [
+    if (type === "text") {
+        setOptions(elements.quality, [
             {
                 value: "original",
-                label: translate(
-                    "options.original"
+                label: optionLabel(
+                    "options.original",
+                    "Original",
+                    "أصلي"
                 )
             }
         ]);
 
-        setSelectOptions(elements.format, [
+        setOptions(elements.format, [
             {
                 value: "txt",
-                label: "TXT"
+                label: optionLabel(
+                    "options.txt",
+                    "TXT",
+                    "TXT"
+                )
             },
             {
                 value: "json",
-                label: "JSON"
+                label: optionLabel(
+                    "options.json",
+                    "JSON",
+                    "JSON"
+                )
             },
             {
                 value: "html",
-                label: "HTML"
-            }
-        ]);
+                label: optionLabel(
+                    "options.html",
 
-        setSelectOptions(elements.audioLanguage, [
-            {
-                value: "original",
-                label: translate(
-                    "options.originalLanguage"
-                )
-            }
-        ]);
-    }
-}
+                    function setupUrl() {
+    if (!elements.urlInput) return;
 
-
-/* =========================================================
-   URL input
-========================================================= */
-
-function updateClearButton() {
-    if (!elements.clearUrl ||
-        !elements.urlInput) {
-        return;
-    }
-
-    const hasValue =
-        elements.urlInput.value.trim().length > 0;
-
-    elements.clearUrl.classList.toggle(
-        "visible",
-        hasValue
-    );
-}
-
-
-if (elements.urlInput) {
     elements.urlInput.addEventListener(
         "input",
-        updateClearButton
-    );
-}
-
-
-if (elements.clearUrl) {
-    elements.clearUrl.addEventListener(
-        "click",
         () => {
-            elements.urlInput.value = "";
-
-            updateClearButton();
-
-            elements.urlInput.focus();
-        }
-    );
-}
-
-
-/* =========================================================
-   Advanced options
-========================================================= */
-
-function updateAdvancedButton() {
-    if (!elements.advancedButton) {
-        return;
-    }
-
-    const key = state.advancedOpen
-        ? "advanced.hide"
-        : "advanced.show";
-
-    const text = translate(key);
-
-    elements.advancedButton.textContent =
-        text || translate("advanced.title");
-}
-
-
-if (elements.advancedButton) {
-    elements.advancedButton.addEventListener(
-        "click",
-        () => {
-            state.advancedOpen =
-                !state.advancedOpen;
-
-            if (elements.advancedOptions) {
-                elements.advancedOptions.classList.toggle(
-                    "open",
-                    state.advancedOpen
-                );
-
-                elements.advancedOptions.hidden =
-                    !state.advancedOpen;
+            if (elements.clearUrl) {
+                elements.clearUrl.hidden =
+                    elements.urlInput.value.trim() === "";
             }
-
-            updateAdvancedButton();
         }
     );
+
+    if (elements.clearUrl) {
+        elements.clearUrl.addEventListener(
+            "click",
+            () => {
+                elements.urlInput.value = "";
+                elements.clearUrl.hidden = true;
+                elements.urlInput.focus();
+            }
+        );
+    }
 }
 
-
-/* =========================================================
-   Theme
-========================================================= */
-
-function applyTheme() {
-    elements.html.dataset.theme =
+function setupTheme() {
+    document.documentElement.dataset.theme =
         state.theme;
 
-    document.body.classList.toggle(
-        "light-theme",
-        state.theme === "light"
-    );
+    if (!elements.themeButton) return;
 
-    localStorage.setItem(
-        "mediagrab-theme",
-        state.theme
-    );
-}
-
-
-if (elements.themeButton) {
     elements.themeButton.addEventListener(
         "click",
         () => {
@@ -642,56 +603,45 @@ if (elements.themeButton) {
                     ? "light"
                     : "dark";
 
-            applyTheme();
+            localStorage.setItem(
+                "mediagrab-theme",
+                state.theme
+            );
+
+            document.documentElement.dataset.theme =
+                state.theme;
         }
     );
 }
 
+function setupDownload() {
+    if (!elements.downloadButton) return;
 
-/* =========================================================
-   Download button
-========================================================= */
-
-function updateDownloadButton() {
-    if (!elements.downloadButton) {
-        return;
-    }
-
-    const text =
-        translate("download.now") ||
-        translate("download.download") ||
-        "Download";
-
-    elements.downloadButton.textContent = text;
-}
-
-
-if (elements.downloadButton) {
     elements.downloadButton.addEventListener(
         "click",
         () => {
             const url =
-                elements.urlInput
-                    ? elements.urlInput.value.trim()
-                    : "";
+                elements.urlInput?.value.trim();
 
             if (!url) {
                 alert(
-                    translate("messages.urlRequired")
+                    translate(
+                        "messages.urlRequired"
+                    )
                 );
-
-                if (elements.urlInput) {
-                    elements.urlInput.focus();
-                }
-
                 return;
             }
 
-            /*
-             * Backend integration will be connected here.
-             *
-             * Current frontend validates the URL only.
-             */
+            try {
+                new URL(url);
+            } catch {
+                alert(
+                    translate(
+                        "errors.invalidUrl"
+                    )
+                );
+                return;
+            }
 
             alert(
                 translate(
@@ -702,33 +652,24 @@ if (elements.downloadButton) {
     );
 }
 
+function initialize() {
+    setupMediaTypes();
+    setupAdvanced();
+    setupUrl();
+    setupTheme();
+    setupDownload();
 
-/* =========================================================
-   Initialization
-========================================================= */
+    updateMediaType("video");
 
-async function initialize() {
-    applyTheme();
-
-    setupMediaTypeButtons();
-
-    updateMediaType(
-        state.mediaType
-    );
-
-    updateClearButton();
-
-    if (
-        elements.advancedOptions &&
-        !state.advancedOpen
-    ) {
-        elements.advancedOptions.hidden = true;
+    if (elements.clearUrl) {
+        elements.clearUrl.hidden =
+            !elements.urlInput?.value.trim();
     }
 
-    await loadLanguage(
-        state.language
-    );
+    loadLanguage(state.language);
 }
 
-
-initialize();
+document.addEventListener(
+    "DOMContentLoaded",
+    initialize
+);
