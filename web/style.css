@@ -36,13 +36,26 @@ html {
 body {
     min-height: 100vh;
 
-    background:
+    background-color: #0b0f1a;
+
+    background-image:
         radial-gradient(
-            circle at 50% -10%,
-            rgba(42, 214, 164, 0.10),
-            transparent 35%
+            circle at 50% 0%,
+            rgba(46, 60, 100, 0.65) 0%,
+            transparent 55%
         ),
-        var(--bg);
+        linear-gradient(
+            180deg,
+            #1b233a 0%,
+            #151d30 30%,
+            #111926 45%,
+            #0c121e 70%,
+            #0b0f1a 100%
+        );
+
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-size: 100% 100%;
 
     color: var(--text);
 
@@ -1209,4 +1222,5 @@ body.light-theme .language-menu {
             18px 4px;
     }
 
-        }
+    }
+    
