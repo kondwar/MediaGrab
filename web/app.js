@@ -286,7 +286,7 @@ function updateAdvancedButton() {
       : t("advanced.show", "Advanced Options");
   }
 
-  options.hidden = !state.advancedOpen;
+  options.classList.toggle("open", state.advancedOpen);
   button.setAttribute("aria-expanded", String(state.advancedOpen));
 }
 
@@ -331,6 +331,11 @@ function setupUrl() {
 
 /* ---------- Theme ---------- */
 
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  document.body.classList.toggle("light-theme", state.theme === "light");
+}
+
 function setupTheme() {
   const button = $("#themeButton");
 
@@ -340,13 +345,13 @@ function setupTheme() {
     state.theme = saved;
   }
 
-  document.documentElement.dataset.theme = state.theme;
+  applyTheme();
 
   if (!button) return;
 
   button.addEventListener("click", () => {
     state.theme = state.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = state.theme;
+    applyTheme();
     storageSet("mediagrab-theme", state.theme);
   });
 }
@@ -425,4 +430,3 @@ function initialize() {
 }
 
 document.addEventListener("DOMContentLoaded", initialize);
-          
