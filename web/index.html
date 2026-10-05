@@ -33,7 +33,7 @@
             class="header-button"
             type="button"
         >
-            🌐 English
+            🌐 <span data-language-label>English</span>
         </button>
 
         <button
@@ -232,9 +232,11 @@
             id="advancedButton"
             class="advanced-button"
             type="button"
-            data-i18n="advanced.show"
+            aria-expanded="false"
         >
-            Advanced Options
+            <span data-i18n="advanced.show">
+                Advanced Options
+            </span>
         </button>
 
 
@@ -504,4 +506,5 @@
 <script src="app.js"></script>
 
 </body>
-</html>
+    </html>
+    
