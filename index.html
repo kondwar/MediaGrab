@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>MediaGrab — Download Media Easily</title>
+
+    <meta
+        name="description"
+        content="MediaGrab helps you download video, audio, subtitles and text from supported platforms."
+    >
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">
+            Media<span>Grab</span>
+        </div>
+
+        <div class="header-actions">
+
+            <button
+                id="languageButton"
+                class="language-button"
+                type="button"
+            >
+                🌐 English
+                <span>⌄</span>
+            </button>
+
+            <button
+                id="themeButton"
+                class="theme-button"
+                type="button"
+                aria-label="Toggle theme"
+            >
+                ☾
+            </button>
+
+        </div>
+    </header>
+
+
+    <!-- Main -->
+    <main>
+
+        <!-- Hero -->
+        <section class="hero">
+
+            <h1>
+                Download Media
+                <span>Easily</span>
+            </h1>
+
+            <p>
+                Paste your media URL, choose the options, and download.
+            </p>
+
+
+            <!-- Downloader -->
+            <section class="downloader-card">
+
+                <div class="url-box">
+
+                    <span class="url-icon">🔗</span>
+
+                    <input
+                        id="mediaUrl"
+                        type="url"
+                        placeholder="Paste video URL here..."
+                        autocomplete="off"
+                    >
+
+                    <button
+                        id="clearUrl"
+                        type="button"
+                        aria-label="Clear URL"
+                    >
+                        ×
+                    </button>
+
+                </div>
+
+
+                <!-- Media Type -->
+                <div class="media-types">
+
+                    <button
+                        class="media-type active"
+                        data-type="video"
+                        type="button"
+                    >
+                        🎬
+                        <span>Video</span>
+                    </button>
+
+                    <button
+                        class="media-type"
+                        data-type="audio"
+                        type="button"
+                    >
+                        🎵
+                        <span>Audio</span>
+                    </button>
+
+                    <button
+                        class="media-type"
+                        data-type="subtitles"
+                        type="button"
+                    >
+                        CC
+                        <span>Subtitles</span>
+                    </button>
+
+                    <button
+                        class="media-type"
+                        data-type="text"
+                        type="button"
+                    >
+                        📄
+                        <span>Text</span>
+                    </button>
+
+                </div>
+
+
+                <!-- Options -->
+                <div class="options">
+
+                    <div class="option">
+
+                        <label for="quality">
+                            Quality
+                        </label>
+
+                        <select id="quality">
+                            <option value="best">
+                                Best Available
+                            </option>
+                        </select>
+
+                    </div>
+
+
+                    <div class="option">
+
+                        <label for="format">
+                            Format
+                        </label>
+
+                        <select id="format">
+                            <option value="mp4">
+                                MP4
+                            </option>
+                        </select>
+
+                    </div>
+
+
+                    <div class="option">
+
+                        <label for="language">
+                            Audio Language
+                        </label>
+
+                        <select id="language">
+                            <option value="any">
+                                Any Language
+                            </option>
+                        </select>
+
+                    </div>
+
+                </div>
+
+
+                <!-- Advanced Options -->
+                <button
+                    id="advancedButton"
+                    class="advanced-button"
+                    type="button"
+                >
+                    ⚙
+                    <span>Advanced Options</span>
+                    <span class="arrow">⌄</span>
+                </button>
+
+
+                <!-- Download -->
+                <button
+                    id="downloadButton"
+                    class="download-button"
+                    type="button"
+                >
+                    ⬇
+                    <span>Download Now</span>
+                </button>
+
+            </section>
+
+        </section>
+
+
+        <!-- Features -->
+        <section class="features">
+
+            <article class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Fast & Easy</h3>
+                <p>
+                    Simple steps and fast processing.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">🛡</div>
+                <h3>Safe & Reliable</h3>
+                <p>
+                    Privacy-focused and secure.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">📱</div>
+                <h3>All Devices</h3>
+                <p>
+                    Works on phones, tablets and computers.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">☁</div>
+                <h3>High Quality</h3>
+                <p>
+                    Download the best available quality.
+                </p>
+            </article>
+
+        </section>
+
+
+        <!-- Supported Platforms -->
+        <section class="platforms">
+
+            <h2>Supported Platforms</h2>
+
+            <div class="platform-grid">
+
+                <div class="platform">TikTok</div>
+                <div class="platform">Facebook</div>
+                <div class="platform">Instagram</div>
+                <div class="platform">YouTube</div>
+
+                <div class="platform">X / Twitter</div>
+                <div class="platform">Reddit</div>
+                <div class="platform">Pinterest</div>
+                <div class="platform">Vimeo</div>
+
+                <div class="platform">Twitch</div>
+
+            </div>
+
+        </section>
+
+
+        <!-- Feature Bar -->
+        <section class="feature-bar">
+
+            <div>
+                <strong>HD</strong>
+                <span>Choose Quality</span>
+                <small>Up to 4K</small>
+            </div>
+
+            <div>
+                <strong>▣</strong>
+                <span>Choose Format</span>
+                <small>MP4, MP3, WEBM...</small>
+            </div>
+
+            <div>
+                <strong>🔊</strong>
+                <span>Choose Audio</span>
+                <small>Multiple languages</small>
+            </div>
+
+            <div>
+                <strong>◉</strong>
+                <span>Preview</span>
+                <small>Before download</small>
+            </div>
+
+            <div>
+                <strong>↓</strong>
+                <span>Download Page</span>
+                <small>After Ads</small>
+            </div>
+
+        </section>
+
+
+        <!-- Contact -->
+        <section class="contact">
+
+            <a
+                href="https://t.me/MediaEarthbot"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                ✈️
+                <span>Contact Us</span>
+            </a>
+
+        </section>
+
+    </main>
+
+
+    <script src="app.js"></script>
+
+</body>
+                          </html>
