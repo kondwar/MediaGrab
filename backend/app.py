@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 import yt_dlp
 
@@ -107,11 +108,11 @@ def clean_formats(info):
                     "acodec": acodec
                 })
 
-    # Highest quality first
     video.sort(
         key=lambda x: (
             x.get("height") or 0,
-            x.get("fps") or 0
+            x.get("fps") or 0,
+            x.get("tbr") or 0
         ),
         reverse=True
     )
@@ -127,10 +128,41 @@ def clean_formats(info):
     }
 
 
+def extract_info(url):
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "extract_flat": False,
+
+        # استخدام PO Token Provider مع عملاء YouTube المناسبة
+        "extractor_args": {
+            "youtube": {
+                "player_client": [
+                    "mweb",
+                    "tv",
+                    "web_safari"
+                ]
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": "http://127.0.0.1:4416"
+            }
+        }
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return ydl.extract_info(
+            url,
+            download=False
+        )
+
+
 @app.get("/")
 def root():
     return {
         "name": "MediaGrab API",
+        "version": "1.0.0",
         "status": "online"
     }
 
@@ -147,22 +179,9 @@ def get_info(request: InfoRequest):
 
     url = str(request.url)
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "noplaylist": True,
-        "extract_flat": False,
-    }
-
     try:
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-            info = ydl.extract_info(
-                url,
-                download=False
-            )
+        info = extract_info(url)
 
         formats = clean_formats(info)
 
@@ -193,4 +212,15 @@ def get_info(request: InfoRequest):
                 "success": False,
                 "error": str(e)
             }
-              )
+        )
+
+
+# يجب أن يكون في نهاية الملف حتى لا يحجب /api/*
+app.mount(
+    "/",
+    StaticFiles(
+        directory="/app/web",
+        html=True
+    ),
+    name="web"
+)
