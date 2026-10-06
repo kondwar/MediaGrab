@@ -1,26 +1,54 @@
-from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, HttpUrl
-import yt_dlp
-import mimetypes
+import logging
 import os
-import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
-import traceback
-import unicodedata
 import urllib.request
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, HttpUrl
+from starlette.background import BackgroundTask
+
+from . import config, db, downloader
+from . import formats as fmt
+from .admin import require_admin
+from .admin import router as admin_router
+from .tg_auth import verified_user_id
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
+
+log = logging.getLogger("mediagrab")
+
+VERSION = config.VERSION
+
+MEDIA_TYPES = ("video", "audio", "subtitles", "text")
 
 
-VERSION = "1.3.0"
+@asynccontextmanager
+async def lifespan(_app):
+    try:
+        db.init_db()
+    except Exception:
+        # Analytics are optional: the downloader keeps working.
+        log.exception("Analytics database could not be initialised")
+
+    downloader.sweep_stale_temp_dirs()
+
+    yield
+
 
 app = FastAPI(
     title="MediaGrab API",
-    version=VERSION
+    version=VERSION,
+    lifespan=lifespan
 )
 
 
@@ -34,33 +62,31 @@ class InfoRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     url: HttpUrl
-    format_id: str
+
+    # Required for video / audio (a format_id returned by /api/info).
+    format_id: Optional[str] = None
+
+    media_type: str = "video"
+
+    # Audio
+    audio_convert: Optional[str] = None
+    audio_bitrate: Optional[str] = None
+    audio_language: Optional[str] = None
+
+    # Subtitles
+    subtitle_lang: Optional[str] = None
+    subtitle_auto: bool = False
+    subtitle_format: str = "srt"
+
+    # Text
+    text_format: str = "txt"
 
 
 # =========================================================
 # Helpers
 # =========================================================
 
-ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-# Characters that yt-dlp would interpret as format-selector syntax.
-# A real format_id returned by /api/info never needs them.
-FORMAT_ID_FORBIDDEN = re.compile(r"[\s/+,\[\]()*|]")
-
-# Partial / temporary files yt-dlp may leave in the temp folder.
-TEMP_SUFFIXES = (".part", ".ytdl", ".temp", ".tmp")
-
-
-def clean_error_text(text):
-
-    return ANSI_PATTERN.sub(
-        "",
-        str(text)
-    ).strip()
-
-
 def error_detail(error_text, error_type):
-
     return {
         "success": False,
         "error": error_text,
@@ -68,428 +94,51 @@ def error_detail(error_text, error_type):
     }
 
 
-def format_size(size):
-    if not size:
-        return None
-
-    if size >= 1024 ** 3:
-        return f"{size / (1024 ** 3):.2f} GB"
-
-    if size >= 1024 ** 2:
-        return f"{size / (1024 ** 2):.2f} MB"
-
-    if size >= 1024:
-        return f"{size / 1024:.2f} KB"
-
-    return f"{size} B"
-
-
-def resolve_entry(info):
+def current_user_id(request: Request):
     """
-    If yt-dlp returns a playlist-like result, use its first
-    real entry. Single videos are returned unchanged.
+    Telegram user id from a *verified* initData header, else None.
+    Values sent by JavaScript are never trusted without the signature.
     """
 
-    if not info:
-        return info
+    init_data = request.headers.get("x-telegram-init-data")
 
-    entries = info.get("entries")
+    current = config.settings()
 
-    if entries and not info.get("formats"):
-
-        for entry in entries:
-
-            if entry:
-                return entry
-
-    return info
-
-
-def sanitize_filename(title, max_length=100):
-
-    text = unicodedata.normalize(
-        "NFKC",
-        str(title or "")
-    )
-
-    # Remove control characters.
-    text = "".join(
-        ch for ch in text
-        if unicodedata.category(ch)[0] != "C"
-    )
-
-    # Remove characters that are unsafe in file names.
-    text = re.sub(
-        r'[\\/:*?"<>|\x00-\x1f]',
-        " ",
-        text
-    )
-
-    # Collapse whitespace.
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # No leading / trailing dots or spaces.
-    text = text.strip(". ")
-
-    if len(text) > max_length:
-        text = text[:max_length].rstrip(". ")
-
-    return text or "media"
-
-
-def remove_directory(path):
-
-    shutil.rmtree(
-        path,
-        ignore_errors=True
-    )
-
-
-def find_downloaded_file(directory):
-
-    candidates = []
-
-    for name in os.listdir(directory):
-
-        if not name.startswith("media."):
-            continue
-
-        if name.endswith(TEMP_SUFFIXES):
-            continue
-
-        full_path = os.path.join(directory, name)
-
-        if os.path.isfile(full_path):
-            candidates.append(full_path)
-
-    if not candidates:
+    if not init_data or not current.telegram_bot_token:
         return None
 
-    # If several files exist, the real output is the largest one.
-    candidates.sort(
-        key=os.path.getsize,
-        reverse=True
+    return verified_user_id(
+        init_data,
+        current.telegram_bot_token,
+        current.initdata_max_age
     )
 
-    return candidates[0]
 
-
-# =========================================================
-# Format cleaning (built from the real yt-dlp formats)
-# =========================================================
-
-def clean_formats(info):
-
-    if not info:
-        return {
-            "video": [],
-            "audio": []
-        }
-
-    video = []
-    audio = []
-
-    seen_video = set()
-    seen_audio = set()
-
-    for f in info.get("formats") or []:
-
-        format_id = f.get("format_id")
-
-        if not format_id:
-            continue
-
-        # Skip storyboards / thumbnail sheets.
-        if f.get("protocol") == "mhtml":
-            continue
-
-        ext = f.get("ext")
-        height = f.get("height")
-        width = f.get("width")
-
-        vcodec = f.get("vcodec")
-        acodec = f.get("acodec")
-
-        filesize = (
-            f.get("filesize")
-            or f.get("filesize_approx")
-        )
-
-        tbr = f.get("tbr")
-
-        has_video = (
-            vcodec != "none"
-            and bool(vcodec or height)
-        )
-
-        has_audio = (
-            acodec not in (None, "none")
-        )
-
-        # -------------------------
-        # VIDEO
-        # (some platforms do not report vcodec, so a known
-        # height is also accepted as a video stream)
-        # -------------------------
-
-        if has_video:
-
-            quality = (
-                f"{height}p"
-                if height
-                else "unknown"
-            )
-
-            key = (
-                quality,
-                ext,
-                format_id
-            )
-
-            if key not in seen_video:
-
-                seen_video.add(key)
-
-                video.append({
-                    "format_id": format_id,
-                    "quality": quality,
-                    "format": ext,
-                    "width": width,
-                    "height": height,
-                    "fps": f.get("fps"),
-                    "filesize": filesize,
-                    "filesize_text": format_size(filesize),
-                    "vcodec": vcodec,
-                    "acodec": acodec,
-                    "has_audio": has_audio,
-                    "tbr": tbr,
-                    "format_note": f.get("format_note"),
-                    "protocol": f.get("protocol"),
-                    "url": f.get("url")
-                })
-
-        # -------------------------
-        # AUDIO ONLY
-        # -------------------------
-
-        elif has_audio:
-
-            bitrate = f.get("abr") or tbr
-
-            quality = (
-                f"{round(bitrate)}kbps"
-                if bitrate
-                else "original"
-            )
-
-            key = (
-                quality,
-                ext,
-                format_id
-            )
-
-            if key not in seen_audio:
-
-                seen_audio.add(key)
-
-                audio.append({
-                    "format_id": format_id,
-                    "quality": quality,
-                    "format": ext,
-                    "bitrate": bitrate,
-                    "tbr": tbr,
-                    "filesize": filesize,
-                    "filesize_text": format_size(filesize),
-                    "acodec": acodec,
-                    "vcodec": vcodec,
-                    "format_note": f.get("format_note"),
-                    "protocol": f.get("protocol"),
-                    "url": f.get("url")
-                })
-
-    video.sort(
-        key=lambda x: (
-            x.get("height") or 0,
-            x.get("fps") or 0,
-            x.get("tbr") or 0
-        ),
-        reverse=True
-    )
-
-    audio.sort(
-        key=lambda x: x.get("bitrate") or 0,
-        reverse=True
-    )
-
-    return {
-        "video": video,
-        "audio": audio
-    }
-
-
-# =========================================================
-# yt-dlp configuration
-# =========================================================
-
-def get_yt_dlp_options():
-
-    return {
-
-        "quiet": False,
-
-        "no_warnings": False,
-
-        "skip_download": True,
-
-        "noplaylist": True,
-
-        "extract_flat": False,
-
-        # JavaScript runtime
-        "js_runtimes": {
-            "node": {
-                "path": "/usr/local/bin/node"
-            }
-        },
-
-        # yt-dlp EJS
-        "remote_components": [
-            "ejs:npm"
-        ],
-
-        # YouTube clients
-        "extractor_args": {
-
-            "youtube": {
-
-                "player_client": [
-                    "mweb",
-                    "web_embedded",
-                    "tv"
-                ]
-
-            },
-
-            "youtubepot-bgutilhttp": {
-
-                "base_url":
-                    "http://127.0.0.1:4416"
-
-            }
-
-        }
-
-    }
-
-
-def get_download_options(format_id, directory):
-
-    options = get_yt_dlp_options()
-
-    options["skip_download"] = False
-
-    options["format"] = format_id
-
-    options["outtmpl"] = os.path.join(
-        directory,
-        "media.%(ext)s"
-    )
-
-    return options
-
-
-def extract_info(url):
-
-    options = get_yt_dlp_options()
-
-    print(
-        "\n========================================"
-    )
-
-    print("MediaGrab extraction")
-
-    print(
-        "URL:",
-        url
-    )
-
+def _run_command(command):
     try:
-
-        print(
-            "yt-dlp:",
-            yt_dlp.version.__version__
-        )
-
-    except Exception:
-
-        print("yt-dlp: unknown")
-
-    print(
-        "========================================\n"
-    )
-
-    with yt_dlp.YoutubeDL(options) as ydl:
-
-        info = ydl.extract_info(
-            url,
-            download=False
-        )
-
-        if info is None:
-
-            raise RuntimeError(
-                "yt-dlp returned no information. "
-                "Check the Blitz deployment logs "
-                "for the actual extractor error."
-            )
-
-        return info
-
-
-# =========================================================
-# Diagnostics
-# =========================================================
-
-def get_ytdlp_version():
-
-    try:
-
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "yt_dlp",
-                "--version"
-            ],
+            command,
             capture_output=True,
             text=True,
             timeout=10
         )
 
-        return result.stdout.strip()
+        return result.stdout.strip().splitlines()[0] if result.stdout else ""
 
     except Exception as e:
-
         return f"unknown: {e}"
 
 
-def check_bgutil():
+def get_ytdlp_version():
+    return _run_command([sys.executable, "-m", "yt_dlp", "--version"])
 
-    url = (
-        "http://127.0.0.1:4416/ping"
-    )
+
+def check_bgutil():
+    url = "http://127.0.0.1:4416/ping"
 
     try:
-
-        with urllib.request.urlopen(
-            url,
-            timeout=3
-        ) as response:
-
-            body = response.read().decode(
-                "utf-8",
-                errors="replace"
-            )
+        with urllib.request.urlopen(url, timeout=3) as response:
+            body = response.read().decode("utf-8", errors="replace")
 
             return {
                 "reachable": True,
@@ -498,7 +147,6 @@ def check_bgutil():
             }
 
     except Exception as e:
-
         return {
             "reachable": False,
             "error": str(e)
@@ -509,341 +157,300 @@ def check_bgutil():
 # Routes
 # =========================================================
 
-@app.get("/")
-def root():
+@app.get("/", include_in_schema=False)
+def root(request: Request):
+    """
+    The web / Mini App interface. API clients that explicitly ask for JSON
+    (Accept: application/json) still get the previous status document.
+    """
 
-    return {
-        "name": "MediaGrab API",
-        "version": VERSION,
-        "status": "online"
-    }
+    accept = request.headers.get("accept", "")
+
+    if "application/json" in accept and "text/html" not in accept:
+        return {
+            "name": "MediaGrab API",
+            "version": VERSION,
+            "status": "online"
+        }
+
+    return FileResponse(
+        config.settings().web_dir / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/health")
 def health():
-
     return {
         "status": "ok",
         "version": VERSION
     }
 
 
-@app.get("/api/debug/youtube")
-def youtube_debug():
+@app.get("/api/config")
+def public_config():
+    """Public, non-secret settings the web interface needs."""
+
+    current = config.settings()
+
+    adsgram_ready = current.adsgram_enabled and bool(current.adsgram_block_id)
+
+    if current.adsgram_enabled and not current.adsgram_block_id:
+        log.warning(
+            "ADSGRAM_ENABLED is true but ADSGRAM_BLOCK_ID is empty: "
+            "ads are treated as disabled."
+        )
 
     return {
-
-        "status": "ok",
-
-        "yt_dlp":
-            get_ytdlp_version(),
-
-        "python":
-            sys.version,
-
-        "node":
-            os.popen(
-                "node --version 2>/dev/null"
-            ).read().strip(),
-
-        "ffmpeg":
-            os.popen(
-                "ffmpeg -version 2>/dev/null "
-                "| head -n 1"
-            ).read().strip(),
-
-        "bgutil":
-            check_bgutil(),
-
-        "configuration": {
-
-            "js_runtime":
-                "node",
-
-            "ejs":
-                True,
-
-            "bgutil_http":
-                True,
-
-            "bgutil_url":
-                "http://127.0.0.1:4416"
-
+        "adsgram": {
+            "enabled": adsgram_ready,
+            "block_id": current.adsgram_block_id if adsgram_ready else "",
+            "fail_mode": current.adsgram_fail_mode,
+            "sdk_url": current.adsgram_sdk_url if adsgram_ready else ""
+        },
+        "telegram": {
+            "auth_configured": bool(current.telegram_bot_token)
         }
+    }
 
+
+@app.get("/api/debug/youtube")
+def youtube_debug(_: bool = Depends(require_admin)):
+
+    return {
+        "status": "ok",
+        "yt_dlp": get_ytdlp_version(),
+        "python": sys.version,
+        "node": _run_command(["node", "--version"]),
+        "ffmpeg": (
+            _run_command(["ffmpeg", "-version"])
+            if shutil.which("ffmpeg") else "not installed"
+        ),
+        "bgutil": check_bgutil(),
+        "configuration": {
+            "js_runtime": "node",
+            "ejs": True,
+            "bgutil_http": True,
+            "bgutil_url": "http://127.0.0.1:4416"
+        }
     }
 
 
 @app.post("/api/info")
-def get_info(
-    request: InfoRequest
-):
+def get_info(request: InfoRequest, http_request: Request):
 
     url = str(request.url)
 
+    user_id = current_user_id(http_request)
+
     started = time.time()
 
+    platform = None
+
     try:
+        info = downloader.resolve_entry(downloader.extract_info(url))
 
-        info = resolve_entry(
-            extract_info(url)
-        )
+        platform = info.get("extractor_key")
 
-        formats = clean_formats(info)
+        downloader.cache_put(url, info)
 
-        elapsed = round(
-            time.time() - started,
-            3
+        formats = fmt.clean_formats(info)
+
+        elapsed = round(time.time() - started, 3)
+
+        db.safe_record_event(
+            action="info",
+            success=True,
+            telegram_user_id=user_id,
+            platform=platform,
+            url=url,
+            processing_time=elapsed
         )
 
         return {
-
             "success": True,
-
-            "title":
-                info.get("title"),
-
-            "thumbnail":
-                info.get("thumbnail"),
-
-            "duration":
-                info.get("duration"),
-
-            "duration_text":
-                info.get("duration_string"),
-
-            "platform":
-                info.get("extractor_key"),
-
-            "webpage_url":
-                info.get("webpage_url"),
-
-            "uploader":
-                info.get("uploader"),
-
-            "view_count":
-                info.get("view_count"),
-
-            "formats":
-                formats,
-
-            "subtitles":
-                list(
-                    (
-                        info.get("subtitles")
-                        or {}
-                    ).keys()
-                ),
-
-            "automatic_captions":
-                list(
-                    (
-                        info.get(
-                            "automatic_captions"
-                        )
-                        or {}
-                    ).keys()
-                ),
-
-            "processing_time":
-                elapsed
-
+            "title": info.get("title"),
+            "thumbnail": info.get("thumbnail"),
+            "duration": info.get("duration"),
+            "duration_text": info.get("duration_string"),
+            "platform": platform,
+            "webpage_url": info.get("webpage_url"),
+            "uploader": info.get("uploader"),
+            "view_count": info.get("view_count"),
+            "formats": formats,
+            "audio_languages": fmt.audio_languages(info),
+            "subtitles": list((info.get("subtitles") or {}).keys()),
+            "automatic_captions": list(
+                (info.get("automatic_captions") or {}).keys()
+            ),
+            "subtitle_tracks": fmt.subtitle_tracks(info),
+            "processing_time": elapsed
         }
 
     except Exception as e:
+        error_text = downloader.clean_error_text(e)
 
-        error_text = clean_error_text(e)
+        log.exception("info failed for %s", url)
 
-        print(
-            "\n========== MEDIAGRAB ERROR =========="
-        )
-
-        print(error_text)
-
-        traceback.print_exc()
-
-        print(
-            "=====================================\n"
+        db.safe_record_event(
+            action="info",
+            success=False,
+            telegram_user_id=user_id,
+            platform=platform,
+            url=url,
+            error_type=type(e).__name__,
+            processing_time=round(time.time() - started, 3)
         )
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=error_detail(
-                error_text,
-                type(e).__name__
-            )
-
+            detail=error_detail(error_text, type(e).__name__)
         )
 
 
 @app.post("/api/download")
-def download_media(
-    request: DownloadRequest,
-    background_tasks: BackgroundTasks
-):
+def download_media(request: DownloadRequest, http_request: Request):
 
     url = str(request.url)
 
-    format_id = request.format_id.strip()
+    media_type = request.media_type
 
-    # Validate the format_id before creating anything on disk.
-    if (
-        not format_id
-        or len(format_id) > 200
-        or FORMAT_ID_FORBIDDEN.search(format_id)
-    ):
-
+    if media_type not in MEDIA_TYPES:
         raise HTTPException(
-
             status_code=400,
+            detail=error_detail("Unsupported media_type.", "InvalidMediaType")
+        )
 
+    format_id = (request.format_id or "").strip()
+
+    # Validate before creating anything on disk.
+    if media_type in ("video", "audio") and not fmt.valid_format_id(format_id):
+        raise HTTPException(
+            status_code=400,
             detail=error_detail(
-                "Invalid format_id. Use a format_id "
-                "returned by /api/info.",
+                "Invalid format_id. Use a format_id returned by /api/info.",
                 "InvalidFormatId"
             )
-
         )
 
-    temp_dir = tempfile.mkdtemp(
-        prefix="mediagrab_"
-    )
+    user_id = current_user_id(http_request)
+
+    started = time.time()
+
+    temp_dir = None
+    result = None
 
     try:
+        with downloader.download_slot():
 
-        options = get_download_options(
-            format_id,
-            temp_dir
-        )
+            temp_dir = downloader.new_temp_dir()
 
-        print(
-            "\n========================================"
-        )
-
-        print("MediaGrab download")
-
-        print(
-            "URL:",
-            url
-        )
-
-        print(
-            "format_id:",
-            format_id
-        )
-
-        print(
-            "========================================\n"
-        )
-
-        with yt_dlp.YoutubeDL(options) as ydl:
-
-            info = ydl.extract_info(
-                url,
-                download=True
+            log.info(
+                "download url=%s type=%s format_id=%s",
+                url, media_type, format_id
             )
 
-        if info is None:
+            if media_type in ("video", "audio"):
+                result = downloader.download_av(
+                    url,
+                    temp_dir,
+                    format_id,
+                    media_type=media_type,
+                    audio_convert=request.audio_convert,
+                    audio_bitrate=request.audio_bitrate,
+                    audio_language=request.audio_language
+                )
 
-            raise RuntimeError(
-                "yt-dlp returned no information "
-                "for this download."
-            )
+            elif media_type == "subtitles":
+                result = downloader.download_subtitles(
+                    url,
+                    temp_dir,
+                    request.subtitle_lang,
+                    auto=request.subtitle_auto,
+                    subtitle_format=request.subtitle_format
+                )
 
-        info = resolve_entry(info)
+            else:
+                result = downloader.export_text(
+                    url,
+                    temp_dir,
+                    text_format=request.text_format
+                )
 
-        file_path = find_downloaded_file(
-            temp_dir
-        )
+        file_size = os.path.getsize(result.path)
 
-        if not file_path:
-
-            raise RuntimeError(
-                "Download finished but no output "
-                "file was found."
-            )
-
-        extension = os.path.splitext(
-            file_path
-        )[1]
-
-        download_name = (
-            sanitize_filename(
-                info.get("title")
-            )
-            + extension
-        )
-
-        media_type = (
-            mimetypes.guess_type(
-                download_name
-            )[0]
-            or "application/octet-stream"
-        )
-
-        # The temporary folder is deleted after the
-        # response has been fully sent to the browser.
-        background_tasks.add_task(
-            remove_directory,
-            temp_dir
-        )
-
-        return FileResponse(
-            path=file_path,
-            filename=download_name,
+        db.safe_record_event(
+            action="download",
+            success=True,
+            telegram_user_id=user_id,
+            platform=result.platform,
+            url=url,
             media_type=media_type,
-            headers={
-                "Cache-Control": "no-store"
-            }
+            format_id=format_id or None,
+            quality=result.quality,
+            processing_time=round(time.time() - started, 3),
+            file_size=file_size
+        )
+
+        # The temporary folder (original video, audio, intermediates and
+        # the final file) is removed after the response has been fully sent.
+        return FileResponse(
+            path=result.path,
+            filename=result.filename,
+            media_type=result.media_type,
+            headers={"Cache-Control": "no-store"},
+            background=BackgroundTask(downloader.remove_directory, temp_dir)
+        )
+
+    except downloader.BusyError as e:
+        if temp_dir:
+            downloader.remove_directory(temp_dir)
+
+        raise HTTPException(
+            status_code=503,
+            detail=error_detail(str(e), "Busy")
         )
 
     except Exception as e:
+        if temp_dir:
+            downloader.remove_directory(temp_dir)
 
-        remove_directory(temp_dir)
+        error_text = downloader.clean_error_text(e)
 
-        error_text = clean_error_text(e)
+        log.exception("download failed for %s", url)
 
-        print(
-            "\n========== MEDIAGRAB DOWNLOAD ERROR =========="
-        )
-
-        print(error_text)
-
-        traceback.print_exc()
-
-        print(
-            "==============================================\n"
+        db.safe_record_event(
+            action="download",
+            success=False,
+            telegram_user_id=user_id,
+            url=url,
+            media_type=media_type,
+            format_id=format_id or None,
+            error_type=type(e).__name__,
+            processing_time=round(time.time() - started, 3)
         )
 
         raise HTTPException(
-
             status_code=400,
-
-            detail=error_detail(
-                error_text,
-                type(e).__name__
-            )
-
+            detail=error_detail(error_text, type(e).__name__)
         )
 
 
 # =========================================================
-# Static files
+# Admin and static files (the "/" mount must stay last)
 # =========================================================
+
+app.include_router(admin_router)
 
 app.mount(
     "/translations",
-    StaticFiles(directory="/app/translations"),
+    StaticFiles(directory=str(config.settings().translations_dir)),
     name="translations"
 )
 
 app.mount(
     "/",
-    StaticFiles(
-        directory="/app/web",
-        html=True
-    ),
+    StaticFiles(directory=str(config.settings().web_dir), html=True),
     name="web"
-)
+        )
