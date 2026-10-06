@@ -1224,3 +1224,157 @@ body.light-theme .language-menu {
 
     }
     
+
+
+/* =========================
+   Detect, status and media info
+   (added for the real-formats flow; uses the existing theme variables)
+========================= */
+
+.detect-button {
+    width: 100%;
+
+    height: 48px;
+
+    margin-top: 12px;
+
+    border: 1px solid var(--border);
+
+    border-radius: 12px;
+
+    background: rgba(42, 214, 164, 0.12);
+
+    color: var(--accent);
+
+    font-size: 14px;
+
+    font-weight: 700;
+
+    cursor: pointer;
+
+    transition:
+        background 0.2s ease,
+        opacity 0.2s ease;
+}
+
+.detect-button:hover {
+    background: rgba(42, 214, 164, 0.2);
+}
+
+.detect-button:disabled,
+.download-button:disabled,
+.option-group select:disabled {
+    opacity: 0.5;
+
+    cursor: not-allowed;
+}
+
+.download-button:disabled:hover {
+    background: var(--accent);
+
+    transform: none;
+
+    box-shadow: none;
+}
+
+.status-line {
+    min-height: 20px;
+
+    margin-top: 12px;
+
+    color: var(--muted);
+
+    font-size: 14px;
+}
+
+.status-line:empty {
+    min-height: 0;
+
+    margin-top: 0;
+}
+
+.status-line.error {
+    color: #ff8c8c;
+}
+
+.status-line.ok {
+    color: var(--accent);
+}
+
+.media-info {
+    display: flex;
+
+    align-items: center;
+
+    gap: 14px;
+
+    margin-top: 16px;
+
+    padding: 12px;
+
+    border-radius: 14px;
+
+    border: 1px solid var(--border);
+
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.media-info[hidden],
+.media-thumb[hidden] {
+    display: none;
+}
+
+.media-thumb {
+    width: 96px;
+
+    height: 54px;
+
+    flex-shrink: 0;
+
+    object-fit: cover;
+
+    border-radius: 8px;
+}
+
+.media-info-text {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 4px;
+
+    min-width: 0;
+}
+
+.media-info-text strong {
+    font-size: 14px;
+
+    overflow: hidden;
+
+    display: -webkit-box;
+
+    -webkit-line-clamp: 2;
+
+    -webkit-box-orient: vertical;
+}
+
+.media-info-text span {
+    color: var(--muted);
+
+    font-size: 12px;
+}
+
+.advanced-content .option-group {
+    margin-top: 12px;
+}
+
+.platform-note {
+    margin-top: 14px;
+
+    color: var(--muted);
+
+    font-size: 12px;
+
+    text-align: center;
+                 }
+             
