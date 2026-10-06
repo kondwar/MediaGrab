@@ -1,15 +1,52 @@
+const F = window.MediaGrabFormats;
+
 const state = {
   language: "en",
   theme: "dark",
   mediaType: "video",
   translations: {},
-  advancedOpen: false
+  advancedOpen: false,
+
+  // Result of /api/info for the detected URL (null until detection).
+  info: null,
+  url: "",
+  detecting: false,
+  downloading: false,
+
+  // Public settings from /api/config (Adsgram etc.).
+  config: null
 };
 
 let languageRequestId = 0;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+const tg = window.Telegram && window.Telegram.WebApp;
+
+/* ---------- Telegram Mini App ---------- */
+
+function initTelegram() {
+  if (!tg) return;
+
+  try {
+    tg.ready();
+    tg.expand();
+  } catch (error) {
+    console.warn("Telegram WebApp init failed:", error);
+  }
+}
+
+/* The signed initData is verified by the backend; it is never trusted here. */
+function requestHeaders() {
+  const headers = { "Content-Type": "application/json" };
+
+  if (tg && tg.initData) {
+    headers["X-Telegram-Init-Data"] = tg.initData;
+  }
+
+  return headers;
+}
 
 /* ---------- Safe storage ---------- */
 
@@ -46,6 +83,17 @@ function t(key, fallback = key) {
   return typeof value === "string" ? value : fallback;
 }
 
+/* ---------- Status line ---------- */
+
+function setStatus(text, kind = "") {
+  const line = $("#statusLine");
+
+  if (!line) return;
+
+  line.textContent = text || "";
+  line.className = "status-line" + (kind ? " " + kind : "");
+}
+
 /* ---------- Options ---------- */
 
 function opt(value, key, fallback) {
@@ -69,75 +117,119 @@ function setOptions(select, options, selectedValue) {
   }
 }
 
-function getOptionSets() {
-  const anyOrOriginalLanguage = [
-    opt("any", "options.anyLanguage", "Any Language"),
-    opt("original", "options.originalLanguage", "Original Language")
-  ];
+function placeholder(key, fallback) {
+  return [{ value: "", label: t(key, fallback) }];
+}
 
-  // The first item of each list is the default value.
+function staticFormatOptions(values) {
+  return values.map((value) => ({ value, label: value.toUpperCase() }));
+}
+
+/* Quality options always come from the real formats of the detected URL. */
+function qualityOptions() {
+  if (!state.info) return [];
+
+  const formats = state.info.formats || {};
+
   switch (state.mediaType) {
     case "video":
-      return {
-        quality: [
-          opt("best", "options.bestAvailable", "Best Available"),
-          opt("original", "options.originalQuality", "Original Quality"),
-          opt("2160p", "options.2160p", "2160p (4K)"),
-          opt("1440p", "options.1440p", "1440p"),
-          opt("1080p", "options.1080p", "1080p"),
-          opt("720p", "options.720p", "720p"),
-          opt("480p", "options.480p", "480p"),
-          opt("360p", "options.360p", "360p")
-        ],
-        format: [
-          opt("mp4", "options.mp4", "MP4"),
-          opt("webm", "options.webm", "WEBM"),
-          opt("mkv", "options.mkv", "MKV")
-        ],
-        audioLanguage: anyOrOriginalLanguage
-      };
+      return F.videoQualityOptions(
+        formats.video,
+        t("options.unknownQuality", "Unknown quality")
+      );
 
     case "audio":
-      return {
-        quality: [
-          opt("original", "options.originalAudio", "Original Audio"),
-          opt("320", "options.320kbps", "320 kbps"),
-          opt("256", "options.256kbps", "256 kbps"),
-          opt("192", "options.192kbps", "192 kbps"),
-          opt("128", "options.128kbps", "128 kbps")
-        ],
-        format: [
-          opt("mp3", "options.mp3", "MP3"),
-          opt("m4a", "options.m4a", "M4A"),
-          opt("opus", "options.opus", "OPUS")
-        ],
-        audioLanguage: anyOrOriginalLanguage
-      };
+      return F.audioSources(formats).options;
 
     case "subtitles":
-      return {
-        quality: [
-          opt("available", "options.availableLanguages", "Available Languages")
-        ],
-        format: [
-          opt("srt", "options.srt", "SRT"),
-          opt("vtt", "options.vtt", "VTT"),
-          opt("txt", "options.txt", "TXT")
-        ],
-        audioLanguage: anyOrOriginalLanguage
-      };
+      return F.subtitleOptions(
+        state.info.subtitle_tracks,
+        t("options.autoCaption", "auto-generated")
+      );
 
     default:
-      return {
-        quality: [opt("original", "options.original", "Original")],
-        format: [
-          opt("txt", "options.txt", "TXT"),
-          opt("json", "options.json", "JSON"),
-          opt("html", "options.html", "HTML")
-        ],
-        audioLanguage: [opt("any", "options.anyLanguage", "Any Language")]
-      };
+      return [
+        opt("text", "options.descriptionMetadata", "Description & metadata")
+      ];
   }
+}
+
+function formatOptions(qualityValue) {
+  if (!state.info) return [];
+
+  const formats = state.info.formats || {};
+
+  switch (state.mediaType) {
+    case "video":
+      return F.videoFormatOptions(
+        formats.video,
+        qualityValue,
+        t("options.mergeNote", "video + audio")
+      );
+
+    case "audio": {
+      const sources = F.audioSources(formats);
+      const source = sources.options.find((o) => o.value === qualityValue);
+
+      return F.conversionOptions(
+        source ? source.ext : "",
+        sources.requiresConversion,
+        t("options.originalFormat", "Original")
+      );
+    }
+
+    case "subtitles":
+      return staticFormatOptions(F.SUBTITLE_FORMATS);
+
+    default:
+      return staticFormatOptions(F.TEXT_FORMATS);
+  }
+}
+
+function languageOptions() {
+  if (!state.info) return [];
+
+  if (state.mediaType !== "video" && state.mediaType !== "audio") return [];
+
+  return F.audioLanguageOptions(
+    state.info.audio_languages,
+    t("options.anyLanguage", "Any Language")
+  );
+}
+
+function fillSelect(select, options, emptyKey, emptyFallback, selected) {
+  if (!select) return;
+
+  if (options.length) {
+    setOptions(select, options, selected);
+    select.disabled = false;
+  } else {
+    setOptions(select, placeholder(emptyKey, emptyFallback));
+    select.disabled = true;
+  }
+}
+
+function refreshFormat(preserved) {
+  const quality = $("#quality");
+  const format = $("#format");
+
+  const emptyKey = state.info
+    ? "options.notAvailable"
+    : "options.detectFirst";
+
+  const emptyFallback = state.info
+    ? "Not available for this link"
+    : "Detect a link first";
+
+  fillSelect(
+    format,
+    quality && quality.value ? formatOptions(quality.value) : [],
+    emptyKey,
+    emptyFallback,
+    preserved
+  );
+
+  updateDownloadAvailability();
 }
 
 /**
@@ -148,6 +240,7 @@ function updateOptions(preserveSelection = false) {
   const quality = $("#quality");
   const format = $("#format");
   const audioLanguage = $("#audioLanguage");
+  const mp3Bitrate = $("#mp3Bitrate");
 
   if (!quality || !format || !audioLanguage) return;
 
@@ -155,19 +248,106 @@ function updateOptions(preserveSelection = false) {
     ? {
         quality: quality.value,
         format: format.value,
-        audioLanguage: audioLanguage.value
+        audioLanguage: audioLanguage.value,
+        mp3Bitrate: mp3Bitrate ? mp3Bitrate.value : ""
       }
     : {};
 
-  const sets = getOptionSets();
+  const emptyKey = state.info
+    ? "options.notAvailable"
+    : "options.detectFirst";
 
-  setOptions(quality, sets.quality, current.quality || sets.quality[0].value);
-  setOptions(format, sets.format, current.format || sets.format[0].value);
-  setOptions(
-    audioLanguage,
-    sets.audioLanguage,
-    current.audioLanguage || sets.audioLanguage[0].value
+  const emptyFallback = state.info
+    ? "Not available for this link"
+    : "Detect a link first";
+
+  fillSelect(
+    quality,
+    qualityOptions(),
+    emptyKey,
+    emptyFallback,
+    current.quality
   );
+
+  refreshFormat(current.format);
+
+  const languages = languageOptions();
+
+  fillSelect(
+    audioLanguage,
+    languages,
+    "options.originalLanguage",
+    "Original Language",
+    current.audioLanguage
+  );
+
+  if (mp3Bitrate) {
+    setOptions(
+      mp3Bitrate,
+      F.MP3_BITRATES.map((value) =>
+        opt(value, `options.${value}kbps`, `${value} kbps`)
+      ),
+      current.mp3Bitrate || "192"
+    );
+  }
+}
+
+/* ---------- Media info card ---------- */
+
+function renderMediaInfo() {
+  const card = $("#mediaInfo");
+
+  if (!card) return;
+
+  if (!state.info) {
+    card.hidden = true;
+    return;
+  }
+
+  const info = state.info;
+
+  const thumbnail = $("#mediaThumb");
+
+  if (thumbnail) {
+    if (info.thumbnail && /^https?:\/\//i.test(info.thumbnail)) {
+      thumbnail.src = info.thumbnail;
+      thumbnail.hidden = false;
+    } else {
+      thumbnail.removeAttribute("src");
+      thumbnail.hidden = true;
+    }
+  }
+
+  $("#mediaTitle").textContent = info.title || "";
+
+  const parts = [];
+
+  if (info.platform) parts.push(info.platform);
+  if (info.uploader) parts.push(info.uploader);
+
+  const duration = F.formatDuration(info.duration);
+
+  if (duration) parts.push(duration);
+
+  if (typeof info.view_count === "number") {
+    parts.push(
+      info.view_count.toLocaleString(state.language) +
+        " " +
+        t("info.views", "views")
+    );
+  }
+
+  $("#mediaMeta").textContent = parts.join(" • ");
+
+  card.hidden = false;
+}
+
+function resetInfo() {
+  state.info = null;
+  state.url = "";
+
+  renderMediaInfo();
+  updateOptions(false);
 }
 
 /* ---------- Language ---------- */
@@ -208,6 +388,7 @@ function applyLanguage() {
   }
 
   updateOptions(true);
+  renderMediaInfo();
   updateAdvancedButton();
   updateDownloadButton();
 }
@@ -216,7 +397,7 @@ async function loadLanguage(language) {
   const requestId = ++languageRequestId;
 
   try {
-    const response = await fetch(`/translations/${language}.json?v=5`, {
+    const response = await fetch(`/translations/${language}.json?v=6`, {
       cache: "no-store"
     });
 
@@ -268,6 +449,12 @@ function setupMediaTypes() {
       updateOptions(false);
     });
   });
+
+  const quality = $("#quality");
+
+  if (quality) {
+    quality.addEventListener("change", () => refreshFormat());
+  }
 }
 
 /* ---------- Advanced options ---------- */
@@ -304,6 +491,15 @@ function setupAdvanced() {
 
 /* ---------- URL input ---------- */
 
+function isValidHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function setupUrl() {
   const input = $("#urlInput");
   const clear = $("#clearUrl");
@@ -316,13 +512,36 @@ function setupUrl() {
     }
   };
 
-  input.addEventListener("input", updateClear);
+  input.addEventListener("input", () => {
+    updateClear();
+
+    // The URL changed after detection: the old formats no longer apply.
+    if (state.info && input.value.trim() !== state.url) {
+      resetInfo();
+    }
+  });
+
+  // Pasting a link starts detection right away.
+  input.addEventListener("paste", () => {
+    setTimeout(() => {
+      if (isValidHttpUrl(input.value.trim())) detect();
+    }, 0);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      detect();
+    }
+  });
 
   if (clear) {
     clear.addEventListener("click", () => {
       input.value = "";
       input.focus();
       updateClear();
+      resetInfo();
+      setStatus("");
     });
   }
 
@@ -343,6 +562,9 @@ function setupTheme() {
 
   if (saved === "light" || saved === "dark") {
     state.theme = saved;
+  } else if (tg && (tg.colorScheme === "light" || tg.colorScheme === "dark")) {
+    // Inside Telegram, follow its color scheme until the user picks one.
+    state.theme = tg.colorScheme;
   }
 
   applyTheme();
@@ -354,6 +576,146 @@ function setupTheme() {
     applyTheme();
     storageSet("mediagrab-theme", state.theme);
   });
+}
+
+/* ---------- Detect ---------- */
+
+async function detect() {
+  const input = $("#urlInput");
+  const button = $("#detectButton");
+
+  if (!input || state.detecting) return;
+
+  const url = input.value.trim();
+
+  if (!url) {
+    setStatus(
+      t("messages.urlRequired", "Please enter a valid media URL."),
+      "error"
+    );
+    input.focus();
+    return;
+  }
+
+  if (!isValidHttpUrl(url)) {
+    setStatus(t("errors.invalidUrl", "Please enter a valid URL."), "error");
+    input.focus();
+    return;
+  }
+
+  state.detecting = true;
+
+  if (button) button.disabled = true;
+
+  setStatus(t("messages.detecting", "Detecting media..."), "busy");
+
+  try {
+    const response = await fetch("/api/info", {
+      method: "POST",
+      headers: requestHeaders(),
+      body: JSON.stringify({ url })
+    });
+
+    let payload = null;
+
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !payload || !payload.success) {
+      throw new Error(
+        F.errorMessage(
+          payload,
+          t("errors.detectionFailed", "Unable to detect media from this URL.")
+        )
+      );
+    }
+
+    state.info = payload;
+    state.url = url;
+
+    renderMediaInfo();
+    updateOptions(false);
+    setStatus("");
+  } catch (error) {
+    resetInfo();
+
+    setStatus(
+      error instanceof TypeError
+        ? t("errors.network", "Network error. Check your connection and try again.")
+        : error.message,
+      "error"
+    );
+  } finally {
+    state.detecting = false;
+
+    if (button) button.disabled = false;
+  }
+}
+
+function setupDetect() {
+  const button = $("#detectButton");
+
+  if (button) button.addEventListener("click", detect);
+}
+
+/* ---------- Adsgram (optional) ---------- */
+
+async function loadConfig() {
+  try {
+    const response = await fetch("/api/config", { cache: "no-store" });
+
+    if (response.ok) {
+      state.config = await response.json();
+    }
+  } catch (error) {
+    console.warn("Config could not be loaded:", error);
+  }
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Ad script failed to load"));
+
+    document.head.appendChild(script);
+  });
+}
+
+/*
+ * Returns true when the download may continue.
+ *   Adsgram disabled (default) -> true, nothing is loaded.
+ *   Adsgram enabled            -> the ad must be shown first. If it
+ *     cannot be shown, ADSGRAM_FAIL_MODE decides: "allow" continues,
+ *     "block" stops with an error.
+ * This gate runs in the browser, so it is a UX flow, not enforcement.
+ */
+async function runAdGate() {
+  const ads = state.config && state.config.adsgram;
+
+  if (!ads || !ads.enabled) return true;
+
+  try {
+    if (!window.Adsgram) {
+      await loadScript(ads.sdk_url);
+    }
+
+    const controller = window.Adsgram.init({ blockId: ads.block_id });
+
+    await controller.show();
+
+    return true;
+  } catch (error) {
+    console.warn("Adsgram failed:", error);
+
+    return ads.fail_mode === "allow";
+  }
 }
 
 /* ---------- Download ---------- */
@@ -370,63 +732,162 @@ function updateDownloadButton() {
   }
 }
 
-function isValidHttpUrl(value) {
+function canDownload() {
+  if (!state.info || state.downloading) return false;
+
+  const quality = $("#quality");
+  const format = $("#format");
+
+  return Boolean(
+    quality && format && quality.value && format.value &&
+    !quality.disabled && !format.disabled
+  );
+}
+
+function updateDownloadAvailability() {
+  const button = $("#downloadButton");
+
+  if (button) button.disabled = !canDownload();
+}
+
+function buildDownloadBody() {
+  const quality = $("#quality").value;
+  const format = $("#format").value;
+  const language = $("#audioLanguage");
+  const audioLanguage = language && !language.disabled && language.value
+    ? language.value
+    : null;
+
+  switch (state.mediaType) {
+    case "video":
+      return {
+        url: state.url,
+        media_type: "video",
+        format_id: format,
+        audio_language: audioLanguage
+      };
+
+    case "audio":
+      return {
+        url: state.url,
+        media_type: "audio",
+        format_id: quality,
+        audio_convert: format === "original" ? null : format,
+        audio_bitrate: $("#mp3Bitrate") ? $("#mp3Bitrate").value : null,
+        audio_language: audioLanguage
+      };
+
+    case "subtitles": {
+      const track = F.parseSubtitleValue(quality);
+
+      return {
+        url: state.url,
+        media_type: "subtitles",
+        subtitle_lang: track.lang,
+        subtitle_auto: track.auto,
+        subtitle_format: format
+      };
+    }
+
+    default:
+      return {
+        url: state.url,
+        media_type: "text",
+        text_format: format
+      };
+  }
+}
+
+function saveBlob(blob, filename) {
+  const link = document.createElement("a");
+  const objectUrl = URL.createObjectURL(blob);
+
+  link.href = objectUrl;
+  link.download = filename;
+  link.style.display = "none";
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+}
+
+async function startDownload() {
+  if (!state.info) {
+    setStatus(t("messages.detectFirst", "Detect the link first."), "error");
+    return;
+  }
+
+  if (!canDownload()) return;
+
+  const body = buildDownloadBody();
+
+  state.downloading = true;
+  updateDownloadAvailability();
+
   try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
+    const allowed = await runAdGate();
+
+    if (!allowed) {
+      setStatus(
+        t("errors.adFailed", "The ad could not be shown. Please try again."),
+        "error"
+      );
+      return;
+    }
+
+    setStatus(
+      t("messages.preparingDownload", "Preparing your download..."),
+      "busy"
+    );
+
+    const response = await fetch("/api/download", {
+      method: "POST",
+      headers: requestHeaders(),
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      let payload = null;
+
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      throw new Error(
+        F.errorMessage(
+          payload,
+          t("errors.downloadFailed", "The download could not be completed.")
+        )
+      );
+    }
+
+    const blob = await response.blob();
+
+    const filename =
+      F.filenameFromDisposition(response.headers.get("Content-Disposition")) ||
+      "media";
+
+    saveBlob(blob, filename);
+
+    setStatus(t("messages.downloadStarted", "Download started."), "ok");
+  } catch (error) {
+    setStatus(
+      error instanceof TypeError
+        ? t("errors.network", "Network error. Check your connection and try again.")
+        : error.message,
+      "error"
+    );
+  } finally {
+    state.downloading = false;
+    updateDownloadAvailability();
   }
 }
 
 function setupDownload() {
   const button = $("#downloadButton");
-  const input = $("#urlInput");
 
-  if (!button || !input) return;
-
-  button.addEventListener("click", () => {
-    const url = input.value.trim();
-
-    if (!url) {
-      alert(t("messages.urlRequired", "Please enter a valid media URL."));
-      input.focus();
-      return;
-    }
-
-    if (!isValidHttpUrl(url)) {
-      alert(t("errors.invalidUrl", "Please enter a valid URL."));
-      input.focus();
-      return;
-    }
-
-    alert(
-      t(
-        "messages.backendComingSoon",
-        "The download backend will be connected in the next step."
-      )
-    );
-  });
-}
-
-/* ---------- Init ---------- */
-
-function initialize() {
-  setupLanguage();
-  setupMediaTypes();
-  setupAdvanced();
-  setupUrl();
-  setupTheme();
-  setupDownload();
-
-  const language = storageGet("mediagrab-language") === "ar" ? "ar" : "en";
-
-  // Render defaults immediately so the UI works even if the
-  // translation file fails to load.
-  state.language = language;
-  applyLanguage();
-
-  loadLanguage(language);
-}
-
-document.addEventListener("DOMContentLoaded", initialize);
+  if (!button) return;
