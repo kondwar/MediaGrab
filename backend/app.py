@@ -115,7 +115,7 @@ def clean_formats(info):
         elif (
             acodec
             and acodec != "none"
-            and not vcodec
+            and (not vcodec or vcodec == "none")
         ):
 
             bitrate = f.get("abr")
@@ -183,13 +183,11 @@ def get_yt_dlp_options():
 
         # JavaScript runtime
         "js_runtimes": {
-            "node": None
+            "node": {}
         },
 
         # yt-dlp EJS
-        "remote_components": {
-            "ejs": ["npm"]
-        },
+        "remote_components": ["ejs:npm"],
 
         # YouTube clients
         "extractor_args": {
@@ -488,10 +486,20 @@ def get_info(
 
 
 app.mount(
+    "/translations",
+    StaticFiles(
+        directory="/app/translations"
+    ),
+    name="translations"
+)
+
+
+app.mount(
     "/",
     StaticFiles(
         directory="/app/web",
         html=True
     ),
     name="web"
-    )
+        )
+    
