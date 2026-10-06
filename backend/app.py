@@ -4,14 +4,15 @@ from pydantic import BaseModel, HttpUrl
 import yt_dlp
 import subprocess
 import urllib.request
-import json
 import os
+import sys
 import time
+import traceback
 
 
 app = FastAPI(
     title="MediaGrab API",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 
@@ -36,6 +37,13 @@ def format_size(size):
 
 
 def clean_formats(info):
+
+    if not info:
+        return {
+            "video": [],
+            "audio": []
+        }
+
     video = []
     audio = []
 
@@ -43,6 +51,7 @@ def clean_formats(info):
     seen_audio = set()
 
     for f in info.get("formats", []):
+
         format_id = f.get("format_id")
 
         if not format_id:
@@ -65,11 +74,13 @@ def clean_formats(info):
         # -------------------------
         # VIDEO
         # -------------------------
+
         if (
             vcodec
             and vcodec != "none"
             and height
         ):
+
             quality = f"{height}p"
 
             key = (
@@ -79,6 +90,7 @@ def clean_formats(info):
             )
 
             if key not in seen_video:
+
                 seen_video.add(key)
 
                 video.append({
@@ -99,11 +111,13 @@ def clean_formats(info):
         # -------------------------
         # AUDIO
         # -------------------------
+
         elif (
             acodec
             and acodec != "none"
             and not vcodec
         ):
+
             bitrate = f.get("abr")
 
             quality = (
@@ -119,6 +133,7 @@ def clean_formats(info):
             )
 
             if key not in seen_audio:
+
                 seen_audio.add(key)
 
                 audio.append({
@@ -153,70 +168,103 @@ def clean_formats(info):
 
 
 def get_yt_dlp_options():
-    """
-    Current YouTube configuration.
-
-    Important:
-    - Node >=22 is installed in Docker.
-    - yt-dlp-ejs is installed.
-    - bgutil provider is installed through pip.
-    - bgutil HTTP server runs on 127.0.0.1:4416.
-    """
 
     return {
-        "quiet": True,
+
+        "quiet": False,
+
         "no_warnings": False,
+
         "skip_download": True,
+
         "noplaylist": True,
+
         "extract_flat": False,
 
-        # Current JS challenge solver.
+        # JavaScript runtime
         "js_runtimes": {
             "node": None
         },
 
-        # Allow yt-dlp to use its EJS components.
+        # yt-dlp EJS
         "remote_components": {
             "ejs": ["npm"]
         },
 
-        # YouTube clients.
-        #
-        # mweb is included because the current PO Token
-        # documentation specifically recommends PO Tokens
-        # for mweb GVS requests.
+        # YouTube clients
         "extractor_args": {
+
             "youtube": {
+
                 "player_client": [
                     "mweb",
                     "web_embedded",
                     "tv"
                 ]
+
             },
 
-            # bgutil HTTP provider
             "youtubepot-bgutilhttp": {
-                "base_url": "http://127.0.0.1:4416"
+
+                "base_url":
+                    "http://127.0.0.1:4416"
+
             }
+
         }
+
     }
 
 
 def extract_info(url):
+
     options = get_yt_dlp_options()
 
+    print(
+        "\n========================================"
+    )
+
+    print("MediaGrab YouTube extraction")
+
+    print(
+        "URL:",
+        url
+    )
+
+    print(
+        "yt-dlp:",
+        yt_dlp.version.__version__
+    )
+
+    print(
+        "========================================\n"
+    )
+
     with yt_dlp.YoutubeDL(options) as ydl:
-        return ydl.extract_info(
+
+        info = ydl.extract_info(
             url,
             download=False
         )
 
+        if info is None:
+
+            raise RuntimeError(
+                "yt-dlp returned no information. "
+                "Check the Blitz deployment logs "
+                "for the actual YouTube extractor error."
+            )
+
+        return info
+
 
 def get_ytdlp_version():
+
     try:
+
         result = subprocess.run(
             [
-                "python",
+                sys.executable,
                 "-m",
                 "yt_dlp",
                 "--version"
@@ -229,18 +277,18 @@ def get_ytdlp_version():
         return result.stdout.strip()
 
     except Exception as e:
+
         return f"unknown: {e}"
 
 
 def check_bgutil():
-    """
-    Check whether the local bgutil provider server
-    is actually reachable.
-    """
 
-    url = "http://127.0.0.1:4416/ping"
+    url = (
+        "http://127.0.0.1:4416/ping"
+    )
 
     try:
+
         with urllib.request.urlopen(
             url,
             timeout=3
@@ -258,28 +306,26 @@ def check_bgutil():
             }
 
     except Exception as e:
+
         return {
             "reachable": False,
             "error": str(e)
         }
 
 
-def get_python_version():
-    import sys
-    return sys.version
-
-
 @app.get("/")
 def root():
+
     return {
         "name": "MediaGrab API",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "status": "online"
     }
 
 
 @app.get("/health")
 def health():
+
     return {
         "status": "ok"
     }
@@ -287,46 +333,54 @@ def health():
 
 @app.get("/api/debug/youtube")
 def youtube_debug():
-    """
-    Diagnostic endpoint.
-
-    This does NOT download anything.
-    It verifies the components required by the
-    current YouTube extraction setup.
-    """
-
-    bgutil = check_bgutil()
 
     return {
+
         "status": "ok",
 
-        "yt_dlp": get_ytdlp_version(),
+        "yt_dlp":
+            get_ytdlp_version(),
 
-        "python": get_python_version(),
+        "python":
+            sys.version,
 
-        "node": os.popen(
-            "node --version 2>/dev/null"
-        ).read().strip(),
+        "node":
+            os.popen(
+                "node --version 2>/dev/null"
+            ).read().strip(),
 
-        "ffmpeg": os.popen(
-            "ffmpeg -version 2>/dev/null | head -n 1"
-        ).read().strip(),
+        "ffmpeg":
+            os.popen(
+                "ffmpeg -version 2>/dev/null "
+                "| head -n 1"
+            ).read().strip(),
 
-        "bgutil": bgutil,
+        "bgutil":
+            check_bgutil(),
 
         "configuration": {
-            "js_runtime": "node",
-            "ejs": True,
-            "bgutil_http": True,
-            "bgutil_url": (
+
+            "js_runtime":
+                "node",
+
+            "ejs":
+                True,
+
+            "bgutil_http":
+                True,
+
+            "bgutil_url":
                 "http://127.0.0.1:4416"
-            )
+
         }
+
     }
 
 
 @app.post("/api/info")
-def get_info(request: InfoRequest):
+def get_info(
+    request: InfoRequest
+):
 
     url = str(request.url)
 
@@ -344,73 +398,94 @@ def get_info(request: InfoRequest):
         )
 
         return {
+
             "success": True,
 
-            "title": info.get("title"),
+            "title":
+                info.get("title"),
 
-            "thumbnail": info.get(
-                "thumbnail"
-            ),
+            "thumbnail":
+                info.get("thumbnail"),
 
-            "duration": info.get(
-                "duration"
-            ),
+            "duration":
+                info.get("duration"),
 
-            "duration_text": info.get(
-                "duration_string"
-            ),
+            "duration_text":
+                info.get("duration_string"),
 
-            "platform": info.get(
-                "extractor_key"
-            ),
+            "platform":
+                info.get("extractor_key"),
 
-            "webpage_url": info.get(
-                "webpage_url"
-            ),
+            "webpage_url":
+                info.get("webpage_url"),
 
-            "uploader": info.get(
-                "uploader"
-            ),
+            "uploader":
+                info.get("uploader"),
 
-            "view_count": info.get(
-                "view_count"
-            ),
+            "view_count":
+                info.get("view_count"),
 
-            "formats": formats,
+            "formats":
+                formats,
 
-            "subtitles": list(
-                (
-                    info.get("subtitles")
-                    or {}
-                ).keys()
-            ),
+            "subtitles":
+                list(
+                    (
+                        info.get("subtitles")
+                        or {}
+                    ).keys()
+                ),
 
-            "automatic_captions": list(
-                (
-                    info.get(
-                        "automatic_captions"
-                    )
-                    or {}
-                ).keys()
-            ),
+            "automatic_captions":
+                list(
+                    (
+                        info.get(
+                            "automatic_captions"
+                        )
+                        or {}
+                    ).keys()
+                ),
 
-            "processing_time": elapsed
+            "processing_time":
+                elapsed
+
         }
 
     except Exception as e:
 
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error": str(e)
-            }
+        error_text = str(e)
+
+        print(
+            "\n========== MEDIAGRAB ERROR =========="
         )
 
+        print(error_text)
 
-# -----------------------------------------
-# Static frontend
-# -----------------------------------------
+        traceback.print_exc()
+
+        print(
+            "=====================================\n"
+        )
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail={
+
+                "success":
+                    False,
+
+                "error":
+                    error_text,
+
+                "type":
+                    type(e).__name__
+
+            }
+
+        )
+
 
 app.mount(
     "/",
@@ -419,4 +494,4 @@ app.mount(
         html=True
     ),
     name="web"
-            )
+        )
