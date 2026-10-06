@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>MediaGrab Admin</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px;
+         background: #071312; color: #f2f8f6; }
+  h1 { font-size: 20px; margin: 0 0 14px; }
+  .bar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+  select, button { background: #102421; color: #f2f8f6; border: 1px solid
+         rgba(255,255,255,.15); border-radius: 10px; padding: 8px 12px; }
+  .grid { display: grid; gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .card { background: #102421; border: 1px solid rgba(255,255,255,.08);
+          border-radius: 14px; padding: 14px; }
+  .card b { display: block; font-size: 24px; color: #2ad6a4; }
+  .card span { color: #91aaa4; font-size: 13px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  td:last-child { text-align: right; }
+  #error { color: #ff8c8c; }
+</style>
+</head>
+<body>
+<h1>MediaGrab Admin</h1>
+
+<div class="bar">
+  <label for="days">New users in the last</label>
+  <select id="days">
+    <option value="1">1 day</option>
+    <option value="7" selected>7 days</option>
+    <option value="30">30 days</option>
+    <option value="365">365 days</option>
+  </select>
+  <button id="refresh" type="button">Refresh</button>
+  <span id="error"></span>
+</div>
+
+<div class="grid" id="cards"></div>
+
+<div id="lists"></div>
+
+<script>
+function bytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 2 : 0) + " " + units[i];
+}
+
+function card(label, value) {
+  const div = document.createElement("div");
+  div.className = "card";
+  const b = document.createElement("b");
+  b.textContent = value;
+  const s = document.createElement("span");
+  s.textContent = label;
+  div.append(b, s);
+  return div;
+}
+
+function list(title, rows) {
+  const wrap = document.createElement("div");
+  const h = document.createElement("h2");
+  h.textContent = title;
+  const table = document.createElement("table");
+  (rows || []).forEach((row) => {
+    const tr = document.createElement("tr");
+    const a = document.createElement("td");
+    const c = document.createElement("td");
+    a.textContent = row.name;
+    c.textContent = row.count;
+    tr.append(a, c);
+    table.appendChild(tr);
+  });
+  if (!rows || !rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.textContent = "No data yet";
+    tr.appendChild(td);
+    table.appendChild(tr);
+  }
+  wrap.append(h, table);
+  return wrap;
+}
+
+async function load() {
+  const error = document.getElementById("error");
+  error.textContent = "";
+
+  try {
+    const days = document.getElementById("days").value;
+    const response = await fetch("/api/admin/stats?days=" + days, {
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const s = await response.json();
+
+    const cards = document.getElementById("cards");
+    cards.replaceChildren(
+      card("Total users", s.total_users),
+      card("New users (" + s.window_days + "d)", s.new_users),
+      card("Total requests", s.total_requests),
+      card("Successful downloads", s.successful_downloads),
+      card("Failed downloads", s.failed_downloads),
+      card("Avg processing time",
+           s.average_processing_time == null
+             ? "-" : s.average_processing_time.toFixed(2) + " s"),
+      card("Total bandwidth", bytes(s.total_bandwidth_bytes))
+    );
+
+    document.getElementById("lists").replaceChildren(
+      list("Platforms", s.platforms),
+      list("Media types", s.media_types),
+      list("Popular qualities", s.popular_qualities)
+    );
+  } catch (e) {
+    error.textContent = "Could not load stats: " + e.message;
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", load);
+document.getElementById("days").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>
