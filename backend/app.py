@@ -494,4 +494,4 @@ app.mount(
         html=True
     ),
     name="web"
-        )
+    )
