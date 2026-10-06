@@ -1,0 +1,43 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+cookies.txt
+*cookies*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Data and logs
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+data/
+*.log
+logs/
+
+# Temporary and downloaded media
+mediagrab_*/
+tmp/
+downloads/
+*.part
+*.ytdl
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.mp3
+*.opus
+
+# Node / editors / OS
+node_modules/
+.DS_Store
+.idea/
+.vscode/
