@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>MediaGrab</title>
+
+    <meta
+        name="description"
+        content="Download video, audio, subtitles and text from supported platforms."
+    >
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<header class="header">
+
+    <div class="logo">
+        MediaGrab
+    </div>
+
+    <div class="header-actions">
+
+        <button
+            id="languageButton"
+            class="header-button"
+            type="button"
+        >
+            🌐 <span data-language-label>English</span>
+        </button>
+
+        <button
+            id="themeButton"
+            class="header-button"
+            type="button"
+        >
+            ◐
+        </button>
+
+    </div>
+
+</header>
+
+
+<main>
+
+    <!-- HERO -->
+
+    <section class="hero">
+
+        <h1>
+            <span data-i18n="hero.title">
+                Download Media
+            </span>
+
+            <span
+                class="accent"
+                data-i18n="hero.titleAccent"
+            >
+                Easily
+            </span>
+        </h1>
+
+        <p data-i18n="hero.description">
+            Download video, audio, subtitles and text
+            from your favorite platforms.
+        </p>
+
+    </section>
+
+
+    <!-- DOWNLOADER -->
+
+    <section class="downloader-card">
+
+        <!-- URL -->
+
+        <div class="url-container">
+
+            <div class="url-input-wrapper">
+
+                <span class="url-icon">
+                    🔗
+                </span>
+
+                <input
+                    id="urlInput"
+                    type="url"
+                    data-i18n-placeholder="url.placeholder"
+                    placeholder="Paste a video, audio or media URL here..."
+                    autocomplete="off"
+                >
+
+                <button
+                    id="clearUrl"
+                    class="clear-url"
+                    type="button"
+                    style="display:none;"
+                    aria-label="Clear URL"
+                >
+                    ×
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- DETECT -->
+
+        <button
+            id="detectButton"
+            class="detect-button"
+            type="button"
+        >
+            <span data-i18n="detect.button">
+                Detect
+            </span>
+        </button>
+
+        <p
+            id="statusLine"
+            class="status-line"
+            role="status"
+            aria-live="polite"
+        ></p>
+
+
+        <!-- MEDIA INFO -->
+
+        <div id="mediaInfo" class="media-info" hidden>
+
+            <img
+                id="mediaThumb"
+                class="media-thumb"
+                alt=""
+                referrerpolicy="no-referrer"
+                hidden
+            >
+
+            <div class="media-info-text">
+                <strong id="mediaTitle"></strong>
+                <span id="mediaMeta"></span>
+            </div>
+
+        </div>
+
+
+        <!-- OPTIONS -->
+
+        <div class="options-grid">
+
+            <div class="option-group">
+
+                <label
+                    for="quality"
+                    data-i18n="options.quality"
+                >
+                    Quality
+                </label>
+
+                <select id="quality" disabled>
+                    <option value="">
+                        Detect a link first
+                    </option>
+                </select>
+
+            </div>
+
+        </div>
+
+
+        <!-- DOWNLOAD -->
+
+        <button
+            id="downloadButton"
+            class="download-button"
+            type="button"
+            disabled
+        >
+            <span data-i18n="download.now">
+                Download Now
+            </span>
+
+            <span class="download-arrow">
+                →
+            </span>
+        </button>
+
+    </section>
+
+
+    <!-- FEATURES -->
+
+    <section class="features">
+
+        <div class="feature-card">
+
+            <div class="feature-icon">
+                ⚡
+            </div>
+
+            <h3 data-i18n="features.fast.title">
+                Fast & Easy
+            </h3>
+
+            <p data-i18n="features.fast.description">
+                Simple interface designed for quick downloads.
+            </p>
+
+        </div>
+
+
+        <div class="feature-card">
+
+            <div class="feature-icon">
+                🛡️
+            </div>
+
+            <h3 data-i18n="features.safe.title">
+                Safe & Reliable
+            </h3>
+
+            <p data-i18n="features.safe.description">
+                Your downloads are processed securely.
+            </p>
+
+        </div>
+
+
+        <div class="feature-card">
+
+            <div class="feature-icon">
+                📱
+            </div>
+
+            <h3 data-i18n="features.devices.title">
+                All Devices
+            </h3>
+
+            <p data-i18n="features.devices.description">
+                Works smoothly on phones, tablets and computers.
+            </p>
+
+        </div>
+
+
+        <div class="feature-card">
+
+            <div class="feature-icon">
+                ✨
+            </div>
+
+            <h3 data-i18n="features.quality.title">
+                High Quality
+            </h3>
+
+            <p data-i18n="features.quality.description">
+                Choose from the qualities actually available.
+            </p>
+
+        </div>
+
+    </section>
+
+
+    <!-- SUPPORTED PLATFORMS -->
+
+    <section class="platforms">
+
+        <h2 data-i18n="platforms.title">
+            Supported Platforms
+        </h2>
+
+        <div class="platform-list">
+
+            <span>YouTube</span>
+            <span>TikTok</span>
+            <span>Instagram</span>
+            <span>Facebook</span>
+            <span>X / Twitter</span>
+            <span>Reddit</span>
+            <span>Pinterest</span>
+            <span>Vimeo</span>
+            <span>Twitch</span>
+
+        </div>
+
+        <p class="platform-note" data-i18n="platforms.note">
+            Supported by yt-dlp, subject to the current extractor and
+            site availability.
+        </p>
+
+    </section>
+
+
+    <!-- FEATURE BAR -->
+
+    <section class="feature-bar">
+
+        <div class="feature-bar-item">
+
+            <div class="feature-bar-icon">
+                ◈
+            </div>
+
+            <div>
+
+                <strong data-i18n="featureBar.quality.title">
+                    Choose Quality
+                </strong>
+
+                <span data-i18n="featureBar.quality.description">
+                    As reported by the source
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <div class="feature-bar-item">
+
+            <div class="feature-bar-icon">
+                ◫
+            </div>
+
+            <div>
+
+                <strong data-i18n="featureBar.format.title">
+                    Choose Format
+                </strong>
+
+                <span data-i18n="featureBar.format.description">
+                    MP4, MP3, WEBM and more
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <div class="feature-bar-item">
+
+            <div class="feature-bar-icon">
+                ♪
+            </div>
+
+            <div>
+
+                <strong data-i18n="featureBar.audio.title">
+                    Choose Audio
+                </strong>
+
+                <span data-i18n="featureBar.audio.description">
+                    Multiple languages
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <div class="feature-bar-item">
+
+            <div class="feature-bar-icon">
+                ▶
+            </div>
+
+            <div>
+
+                <strong data-i18n="featureBar.preview.title">
+                    Preview
+                </strong>
+
+                <span data-i18n="featureBar.preview.description">
+                    Before download
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <div class="feature-bar-item">
+
+            <div class="feature-bar-icon">
+                ↓
+            </div>
+
+            <div>
+
+                <strong data-i18n="featureBar.downloadPage.title">
+                    Download Page
+                </strong>
+
+                <span data-i18n="featureBar.downloadPage.description">
+                    Direct file
+                </span>
+
+            </div>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- FOOTER -->
+
+<footer class="footer">
+
+    <a
+        href="https://t.me/umiver"
+        target="_blank"
+        rel="noopener noreferrer"
+        data-i18n="contact.title"
+    >
+        Contact Us
+    </a>
+
+</footer>
+
+
+<script src="formats-ui.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
